@@ -122,11 +122,11 @@ export const api = {
       },
       body: JSON.stringify({ data, columns })
     });
-    
+
     if (!response.ok) {
       throw new Error(`Export failed: ${response.status}`);
     }
-    
+
     // Download the file
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
@@ -137,5 +137,16 @@ export const api = {
     a.click();
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
+  },
+
+  // Generate synthetic data for a table
+  async generateData(tableName: string, numRows: number = 10): Promise<GenerateDataResponse> {
+    return apiRequest<GenerateDataResponse>('/generate-data', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ table_name: tableName, num_rows: numRows })
+    });
   }
 };

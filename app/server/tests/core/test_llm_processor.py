@@ -204,15 +204,17 @@ class TestLLMProcessor:
     
     @patch('core.llm_processor.generate_sql_with_openai')
     def test_generate_sql_openai_key_priority(self, mock_openai_func):
-        # Test that OpenAI is used when OpenAI key exists (regardless of request preference)
+        # Test that OpenAI is used when OpenAI key exists (and no Gemini key)
         mock_openai_func.return_value = "SELECT * FROM users"
-        
-        with patch.dict(os.environ, {'OPENAI_API_KEY': 'openai-key', 'ANTHROPIC_API_KEY': 'anthropic-key'}):
+
+        # Clear GEMINI_API_KEY to test OpenAI priority over Anthropic
+        env_without_gemini = {'OPENAI_API_KEY': 'openai-key', 'ANTHROPIC_API_KEY': 'anthropic-key'}
+        with patch.dict(os.environ, env_without_gemini, clear=True):
             request = QueryRequest(query="Show all users", llm_provider="anthropic")
             schema_info = {'tables': {}}
-            
+
             result = generate_sql(request, schema_info)
-            
+
             assert result == "SELECT * FROM users"
             mock_openai_func.assert_called_once_with("Show all users", schema_info)
     
@@ -260,15 +262,17 @@ class TestLLMProcessor:
     
     @patch('core.llm_processor.generate_sql_with_openai')
     def test_generate_sql_both_keys_openai_priority(self, mock_openai_func):
-        # Test that OpenAI has priority when both keys exist
+        # Test that OpenAI has priority over Anthropic (when Gemini key not available)
         mock_openai_func.return_value = "SELECT * FROM inventory"
-        
-        with patch.dict(os.environ, {'OPENAI_API_KEY': 'openai-key', 'ANTHROPIC_API_KEY': 'anthropic-key'}):
+
+        # Clear environment and set only OpenAI and Anthropic keys (no Gemini)
+        env_without_gemini = {'OPENAI_API_KEY': 'openai-key', 'ANTHROPIC_API_KEY': 'anthropic-key'}
+        with patch.dict(os.environ, env_without_gemini, clear=True):
             request = QueryRequest(query="Show inventory", llm_provider="anthropic")
             schema_info = {'tables': {}}
-            
+
             result = generate_sql(request, schema_info)
-            
+
             assert result == "SELECT * FROM inventory"
             mock_openai_func.assert_called_once_with("Show inventory", schema_info)
     
