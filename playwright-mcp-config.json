@@ -6,7 +6,7 @@
     },
     "contextOptions": {
       "recordVideo": {
-        "dir": "./videos",
+        "dir": "/c/Users/amogh/Downloads/tac-7/tac-7/trees/92cebe09/videos",
         "size": {
           "width": 1920,
           "height": 1080

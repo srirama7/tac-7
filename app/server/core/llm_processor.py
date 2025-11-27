@@ -1,8 +1,9 @@
 import os
-from typing import Dict, Any
+from typing import Dict, Any, List
 from openai import OpenAI
 from anthropic import Anthropic
 from core.data_models import QueryRequest
+from core.data_generator import format_data_generation_prompt
 
 def generate_sql_with_openai(query_text: str, schema_info: Dict[str, Any]) -> str:
     """
@@ -271,15 +272,137 @@ def generate_sql(request: QueryRequest, schema_info: Dict[str, Any]) -> str:
     """
     openai_key = os.environ.get("OPENAI_API_KEY")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
-    
+
     # Check API key availability first (OpenAI priority)
     if openai_key:
         return generate_sql_with_openai(request.query, schema_info)
     elif anthropic_key:
         return generate_sql_with_anthropic(request.query, schema_info)
-    
+
     # Fall back to request preference if both keys available or neither available
     if request.llm_provider == "openai":
         return generate_sql_with_openai(request.query, schema_info)
     else:
         return generate_sql_with_anthropic(request.query, schema_info)
+
+def generate_synthetic_data_with_openai(
+    table_name: str, schema: List[Dict[str, Any]], sample_rows: List[Dict[str, Any]]
+) -> str:
+    """
+    Generate synthetic data using OpenAI API.
+
+    Args:
+        table_name: Name of the table
+        schema: List of column information dictionaries
+        sample_rows: Sample rows from the table
+
+    Returns:
+        str: LLM response containing generated data in JSON format
+
+    Raises:
+        Exception: If API call fails or API key is not set
+    """
+    try:
+        # Get API key from environment
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY environment variable not set")
+
+        client = OpenAI(api_key=api_key)
+
+        # Format prompt
+        prompt = format_data_generation_prompt(table_name, schema, sample_rows)
+
+        # Call OpenAI API
+        response = client.chat.completions.create(
+            model="gpt-4.1-2025-04-14",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a synthetic data generator. Generate realistic data that matches existing patterns. Return only valid JSON arrays without any markdown formatting or explanations.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.7,
+            max_tokens=2000,
+        )
+
+        return response.choices[0].message.content.strip()
+
+    except Exception as e:
+        raise Exception(f"Error generating synthetic data with OpenAI: {str(e)}")
+
+
+def generate_synthetic_data_with_anthropic(
+    table_name: str, schema: List[Dict[str, Any]], sample_rows: List[Dict[str, Any]]
+) -> str:
+    """
+    Generate synthetic data using Anthropic API.
+
+    Args:
+        table_name: Name of the table
+        schema: List of column information dictionaries
+        sample_rows: Sample rows from the table
+
+    Returns:
+        str: LLM response containing generated data in JSON format
+
+    Raises:
+        Exception: If API call fails or API key is not set
+    """
+    try:
+        # Get API key from environment
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY environment variable not set")
+
+        client = Anthropic(api_key=api_key)
+
+        # Format prompt
+        prompt = format_data_generation_prompt(table_name, schema, sample_rows)
+
+        # Call Anthropic API
+        response = client.messages.create(
+            model="claude-sonnet-4-0",
+            max_tokens=2000,
+            temperature=0.7,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        return response.content[0].text.strip()
+
+    except Exception as e:
+        raise Exception(f"Error generating synthetic data with Anthropic: {str(e)}")
+
+
+def generate_synthetic_data(
+    table_name: str, schema: List[Dict[str, Any]], sample_rows: List[Dict[str, Any]]
+) -> str:
+    """
+    Route to appropriate LLM provider for synthetic data generation.
+    Priority: 1) OpenAI API key exists, 2) Anthropic API key exists
+
+    Args:
+        table_name: Name of the table
+        schema: List of column information dictionaries
+        sample_rows: Sample rows from the table
+
+    Returns:
+        str: LLM response containing generated data in JSON format
+
+    Raises:
+        ValueError: If no API key is found
+        Exception: If LLM call fails
+    """
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+
+    # Check API key availability (OpenAI priority)
+    if openai_key:
+        return generate_synthetic_data_with_openai(table_name, schema, sample_rows)
+    elif anthropic_key:
+        return generate_synthetic_data_with_anthropic(table_name, schema, sample_rows)
+    else:
+        raise ValueError(
+            "No LLM API key found. Please set either OPENAI_API_KEY or ANTHROPIC_API_KEY"
+        )
