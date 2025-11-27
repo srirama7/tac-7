@@ -6,13 +6,12 @@ Handles sampling, validation, and insertion of LLM-generated data.
 import json
 import sqlite3
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from .sql_security import (
     validate_identifier,
     check_table_exists,
     execute_query_safely,
     escape_identifier,
-    SQLSecurityError,
 )
 
 logger = logging.getLogger(__name__)

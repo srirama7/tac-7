@@ -5,7 +5,7 @@ Unit tests for synthetic data generation functionality.
 import pytest
 import sqlite3
 import json
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock
 from core.data_generator import (
     sample_random_rows,
     format_data_generation_prompt,
