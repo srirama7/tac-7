@@ -21,12 +21,19 @@ from core.data_models import (
     ColumnInfo,
     RandomQueryResponse,
     ExportRequest,
-    QueryExportRequest
+    QueryExportRequest,
+    GenerateDataRequest,
+    GenerateDataResponse,
 )
 from core.file_processor import convert_csv_to_sqlite, convert_json_to_sqlite, convert_jsonl_to_sqlite
-from core.llm_processor import generate_sql, generate_random_query
+from core.llm_processor import generate_sql, generate_random_query, generate_synthetic_data
 from core.sql_processor import execute_sql_safely, get_database_schema
 from core.insights import generate_insights
+from core.data_generator import (
+    sample_random_rows,
+    parse_generated_data,
+    insert_generated_rows,
+)
 from core.sql_security import (
     execute_query_safely,
     validate_identifier,
@@ -239,6 +246,118 @@ async def generate_random_query_endpoint() -> RandomQueryResponse:
         return RandomQueryResponse(
             query="Could not generate a random query. Please try again.",
             error=str(e)
+        )
+
+@app.post("/api/generate-data", response_model=GenerateDataResponse)
+async def generate_data_endpoint(request: GenerateDataRequest) -> GenerateDataResponse:
+    """Generate synthetic data for a table using LLM"""
+    try:
+        # Validate table name
+        try:
+            validate_identifier(request.table_name, "table")
+        except SQLSecurityError as e:
+            return GenerateDataResponse(
+                rows_generated=0,
+                table_name=request.table_name,
+                error=str(e)
+            )
+
+        # Connect to database
+        conn = sqlite3.connect("db/database.db")
+
+        # Check if table exists
+        if not check_table_exists(conn, request.table_name):
+            conn.close()
+            return GenerateDataResponse(
+                rows_generated=0,
+                table_name=request.table_name,
+                error=f"Table '{request.table_name}' not found"
+            )
+
+        # Sample random rows from the table
+        try:
+            sample_rows = sample_random_rows(conn, request.table_name, sample_size=10)
+        except ValueError as e:
+            conn.close()
+            return GenerateDataResponse(
+                rows_generated=0,
+                table_name=request.table_name,
+                error=str(e)
+            )
+
+        # Get table schema
+        schema_info = get_database_schema()
+        table_info = schema_info['tables'].get(request.table_name)
+
+        if not table_info:
+            conn.close()
+            return GenerateDataResponse(
+                rows_generated=0,
+                table_name=request.table_name,
+                error=f"Could not retrieve schema for table '{request.table_name}'"
+            )
+
+        # Format schema for data generation
+        schema = [
+            {"name": col_name, "type": col_type}
+            for col_name, col_type in table_info['columns'].items()
+        ]
+
+        # Generate synthetic data using LLM
+        try:
+            llm_response = generate_synthetic_data(
+                request.table_name, schema, sample_rows
+            )
+        except Exception as e:
+            conn.close()
+            return GenerateDataResponse(
+                rows_generated=0,
+                table_name=request.table_name,
+                error=f"LLM generation failed: {str(e)}"
+            )
+
+        # Parse and validate generated data
+        try:
+            generated_rows = parse_generated_data(llm_response, schema)
+        except ValueError as e:
+            conn.close()
+            return GenerateDataResponse(
+                rows_generated=0,
+                table_name=request.table_name,
+                error=f"Failed to parse LLM response: {str(e)}"
+            )
+
+        # Insert generated rows into the table
+        try:
+            inserted_count = insert_generated_rows(
+                conn, request.table_name, generated_rows, schema
+            )
+        except Exception as e:
+            conn.close()
+            return GenerateDataResponse(
+                rows_generated=0,
+                table_name=request.table_name,
+                error=f"Failed to insert generated rows: {str(e)}"
+            )
+
+        conn.close()
+
+        response = GenerateDataResponse(
+            rows_generated=inserted_count,
+            table_name=request.table_name
+        )
+        logger.info(
+            f"[SUCCESS] Generated {inserted_count} synthetic rows for table: {request.table_name}"
+        )
+        return response
+
+    except Exception as e:
+        logger.error(f"[ERROR] Synthetic data generation failed: {str(e)}")
+        logger.error(f"[ERROR] Full traceback:\n{traceback.format_exc()}")
+        return GenerateDataResponse(
+            rows_generated=0,
+            table_name=request.table_name,
+            error=f"Unexpected error: {str(e)}"
         )
 
 @app.get("/api/health", response_model=HealthCheckResponse)

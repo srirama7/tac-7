@@ -333,7 +333,37 @@ function displayTables(tables: TableSchema[]) {
     buttonsContainer.style.display = 'flex';
     buttonsContainer.style.gap = '0.5rem';
     buttonsContainer.style.alignItems = 'center';
-    
+
+    // Create generate data button
+    const generateButton = document.createElement('button');
+    generateButton.className = 'generate-data-button';
+    generateButton.innerHTML = '\u{1F3B2} Generate';
+    generateButton.title = 'Generate 10 synthetic data rows';
+    generateButton.onclick = async () => {
+      // Disable button and show loading state
+      generateButton.disabled = true;
+      const originalContent = generateButton.innerHTML;
+      generateButton.innerHTML = '\u{23F3} Generating...';
+
+      try {
+        const response = await api.generateSyntheticData(table.name);
+
+        if (response.error) {
+          displayError(response.error);
+        } else {
+          displaySuccess(`Added ${response.rows_generated} rows to ${response.table_name}`);
+          // Refresh schema to update row counts
+          await loadDatabaseSchema();
+        }
+      } catch (error) {
+        displayError('Failed to generate synthetic data');
+      } finally {
+        // Re-enable button and restore content
+        generateButton.disabled = false;
+        generateButton.innerHTML = originalContent;
+      }
+    };
+
     // Create export button
     const exportButton = document.createElement('button');
     exportButton.className = 'export-button table-export-button';
@@ -346,13 +376,14 @@ function displayTables(tables: TableSchema[]) {
         displayError('Failed to export table');
       }
     };
-    
+
     const removeButton = document.createElement('button');
     removeButton.className = 'remove-table-button';
     removeButton.innerHTML = '&times;';
     removeButton.title = 'Remove table';
     removeButton.onclick = () => removeTable(table.name);
-    
+
+    buttonsContainer.appendChild(generateButton);
     buttonsContainer.appendChild(exportButton);
     buttonsContainer.appendChild(removeButton);
     
@@ -420,13 +451,31 @@ function displayError(message: string) {
   const errorDiv = document.createElement('div');
   errorDiv.className = 'error-message';
   errorDiv.textContent = message;
-  
+
   const resultsContainer = document.getElementById('results-container') as HTMLDivElement;
   resultsContainer.innerHTML = '';
   resultsContainer.appendChild(errorDiv);
-  
+
   const resultsSection = document.getElementById('results-section') as HTMLElement;
   resultsSection.style.display = 'block';
+}
+
+function displaySuccess(message: string) {
+  const successDiv = document.createElement('div');
+  successDiv.className = 'success-message';
+  successDiv.textContent = message;
+
+  const resultsContainer = document.getElementById('results-container') as HTMLDivElement;
+  resultsContainer.innerHTML = '';
+  resultsContainer.appendChild(successDiv);
+
+  const resultsSection = document.getElementById('results-section') as HTMLElement;
+  resultsSection.style.display = 'block';
+
+  // Auto-hide success message after 3 seconds
+  setTimeout(() => {
+    resultsSection.style.display = 'none';
+  }, 3000);
 }
 
 // Initialize modal
