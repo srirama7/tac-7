@@ -333,7 +333,51 @@ function displayTables(tables: TableSchema[]) {
     buttonsContainer.style.display = 'flex';
     buttonsContainer.style.gap = '0.5rem';
     buttonsContainer.style.alignItems = 'center';
-    
+
+    // Create generate data button (left of export)
+    const generateButton = document.createElement('button');
+    generateButton.className = 'generate-data-button table-action-button';
+    generateButton.innerHTML = '+ Generate';
+    generateButton.title = 'Generate synthetic data rows';
+    generateButton.onclick = async () => {
+      generateButton.disabled = true;
+      generateButton.innerHTML = '<span class="loading-secondary"></span>';
+      try {
+        const response = await api.generateData(table.name, 10);
+        if (response.error) {
+          displayError(response.error);
+        } else {
+          // Show success message
+          const successDiv = document.createElement('div');
+          successDiv.className = 'success-message';
+          successDiv.textContent = `Generated ${response.rows_generated} rows! New total: ${response.new_total_rows} rows.`;
+          successDiv.style.cssText = `
+            background: rgba(40, 167, 69, 0.1);
+            border: 1px solid var(--success-color);
+            color: var(--success-color);
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+          `;
+
+          const tablesSection = document.getElementById('tables-section') as HTMLElement;
+          tablesSection.insertBefore(successDiv, tablesSection.firstChild);
+
+          setTimeout(() => {
+            successDiv.remove();
+          }, 3000);
+
+          // Refresh schema to update row counts
+          await loadDatabaseSchema();
+        }
+      } catch (error) {
+        displayError(error instanceof Error ? error.message : 'Failed to generate data');
+      } finally {
+        generateButton.disabled = false;
+        generateButton.innerHTML = '+ Generate';
+      }
+    };
+
     // Create export button
     const exportButton = document.createElement('button');
     exportButton.className = 'export-button table-export-button';
@@ -346,13 +390,14 @@ function displayTables(tables: TableSchema[]) {
         displayError('Failed to export table');
       }
     };
-    
+
     const removeButton = document.createElement('button');
     removeButton.className = 'remove-table-button';
     removeButton.innerHTML = '&times;';
     removeButton.title = 'Remove table';
     removeButton.onclick = () => removeTable(table.name);
-    
+
+    buttonsContainer.appendChild(generateButton);
     buttonsContainer.appendChild(exportButton);
     buttonsContainer.appendChild(removeButton);
     

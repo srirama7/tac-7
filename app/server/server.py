@@ -21,10 +21,12 @@ from core.data_models import (
     ColumnInfo,
     RandomQueryResponse,
     ExportRequest,
-    QueryExportRequest
+    QueryExportRequest,
+    GenerateDataRequest,
+    GenerateDataResponse
 )
 from core.file_processor import convert_csv_to_sqlite, convert_json_to_sqlite, convert_jsonl_to_sqlite
-from core.llm_processor import generate_sql, generate_random_query
+from core.llm_processor import generate_sql, generate_random_query, generate_synthetic_data
 from core.sql_processor import execute_sql_safely, get_database_schema
 from core.insights import generate_insights
 from core.sql_security import (
@@ -349,7 +351,7 @@ async def export_query_results(request: QueryExportRequest) -> Response:
     try:
         # Generate CSV from query results
         csv_data = generate_csv_from_data(request.data, request.columns)
-        
+
         # Return CSV response
         return Response(
             content=csv_data,
@@ -362,6 +364,88 @@ async def export_query_results(request: QueryExportRequest) -> Response:
         logger.error(f"[ERROR] Query export failed: {str(e)}")
         logger.error(f"[ERROR] Full traceback:\n{traceback.format_exc()}")
         raise HTTPException(500, f"Error exporting query results: {str(e)}")
+
+@app.post("/api/generate-data", response_model=GenerateDataResponse)
+async def generate_data_endpoint(request: GenerateDataRequest) -> GenerateDataResponse:
+    """Generate synthetic data rows for a table based on existing patterns"""
+    try:
+        # Validate table name
+        try:
+            validate_identifier(request.table_name, "table")
+        except SQLSecurityError as e:
+            raise HTTPException(400, str(e))
+
+        # Connect to database
+        conn = sqlite3.connect("db/database.db")
+
+        # Check if table exists
+        if not check_table_exists(conn, request.table_name):
+            conn.close()
+            raise HTTPException(404, f"Table '{request.table_name}' not found")
+
+        # Get table schema
+        cursor = conn.cursor()
+        cursor.execute(f"PRAGMA table_info([{request.table_name}])")
+        columns_info = cursor.fetchall()
+        schema = {col[1]: col[2] for col in columns_info}
+
+        # Sample 10 random existing rows
+        cursor.execute(f"SELECT * FROM [{request.table_name}] ORDER BY RANDOM() LIMIT 10")
+        sample_rows = cursor.fetchall()
+        column_names = [description[0] for description in cursor.description]
+
+        # Convert to list of dicts
+        sample_data = [dict(zip(column_names, row)) for row in sample_rows]
+
+        if len(sample_data) == 0:
+            conn.close()
+            raise HTTPException(400, "Table is empty. Cannot generate data without sample rows.")
+
+        # Generate synthetic data using LLM
+        logger.info(f"[INFO] Generating {request.num_rows} synthetic rows for table: {request.table_name}")
+        synthetic_rows = generate_synthetic_data(
+            request.table_name,
+            schema,
+            sample_data,
+            request.num_rows
+        )
+
+        # Insert generated rows into the table
+        if synthetic_rows:
+            placeholders = ", ".join(["?" for _ in column_names])
+            insert_sql = f"INSERT INTO [{request.table_name}] ({', '.join([f'[{c}]' for c in column_names])}) VALUES ({placeholders})"
+
+            for row in synthetic_rows:
+                values = [row.get(col) for col in column_names]
+                cursor.execute(insert_sql, values)
+
+            conn.commit()
+
+        # Get new total row count
+        cursor.execute(f"SELECT COUNT(*) FROM [{request.table_name}]")
+        new_total = cursor.fetchone()[0]
+
+        conn.close()
+
+        response = GenerateDataResponse(
+            table_name=request.table_name,
+            rows_generated=len(synthetic_rows),
+            new_total_rows=new_total
+        )
+        logger.info(f"[SUCCESS] Generated {len(synthetic_rows)} rows for table: {request.table_name}, new total: {new_total}")
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[ERROR] Data generation failed: {str(e)}")
+        logger.error(f"[ERROR] Full traceback:\n{traceback.format_exc()}")
+        return GenerateDataResponse(
+            table_name=request.table_name,
+            rows_generated=0,
+            new_total_rows=0,
+            error=str(e)
+        )
 
 if __name__ == "__main__":
     import uvicorn

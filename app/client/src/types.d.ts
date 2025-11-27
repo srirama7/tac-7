@@ -84,3 +84,11 @@ interface HealthCheckResponse {
   version: string;
   uptime_seconds: number;
 }
+
+// Generate Data Types
+interface GenerateDataResponse {
+  table_name: string;
+  rows_generated: number;
+  new_total_rows: number;
+  error?: string;
+}
